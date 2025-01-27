@@ -42,3 +42,7 @@ pca.set_pwm(0, 0, 1500)?;
 ```rust
 pca9685.set_all_pwm(0, 0)?;
 ```
+
+## Thanks
+
+Special thanks to the [rppal](https://github.com/golemparts/rppal) crate for acting as a base to this crate and to [adafruit_pwm_servo_driver](https://github.com/ostrosco/adafruit_pwm_servo_driver) for generic implementation details :)
