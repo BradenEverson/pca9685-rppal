@@ -1,4 +1,21 @@
-//! Rppal Wrapper for the Adafruit PCA9685 Servo/PWM Controller
+//! A `rppal`-based wrapper for the Adafruit PCA9685 Servo/PWM Controller.
+//!
+//! This crate provides a convenient interface to the PCA9685 PWM driver via I²C on the Raspberry Pi,
+//! using the [`rppal`](https://docs.rs/rppal) library.
+//!
+//! The PCA9685 is often used to control servos or LEDs, offering up to 16 independent PWM channels.
+//!
+//! # Example
+//!
+//! ```ignore
+//! use pca9685_rppal::*;
+//!
+//! let mut pwm = Pca9685::new().expect("Create Pca9685");
+//! pwm.init().expect("Initialize Pca9685");
+//! pwm.set_pwm_freq(50.0).expect("Set Frequency to 50hz (common for servos)");
+//! pwm.set_pwm(0, 0, 1500).expect("Set PWM on channel 0");
+//!
+//! ```
 
 use std::time::Duration;
 
@@ -55,14 +72,23 @@ pub const OUTDRV: u8 = 0x04;
 /// Software reset command for the PCA9685, used to reset all devices on the I²C bus.
 pub const SWRST: u8 = 0x06;
 
-/// A PCA9685 device
+/// Represents a PCA9685 device connected via I²C.
+///
+/// This struct wraps an `rppal::i2c::I2c` instance pointed at the
+/// appropriate slave address, providing helper methods to easily
+/// configure the PCA9685 and set PWM values on its channels.
 pub struct Pca9685 {
-    /// Underlying I2c Device
+    /// Underlying I²c Device
     i2c: I2c,
 }
 
 impl Pca9685 {
-    /// Construct a new Pca9685 device
+    /// Constructs a new `Pca9685` device at the default address (0x40) on the default I²C bus.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error of type [`rppal::i2c::Error`] if an I²C device
+    /// cannot be created or the default bus cannot be accessed.
     pub fn new() -> rppal::i2c::Result<Self> {
         let mut i2c = I2c::new()?;
         i2c.set_slave_address(PCA9685_ADDRESS)?;
@@ -70,7 +96,22 @@ impl Pca9685 {
         Ok(Self { i2c })
     }
 
-    /// Initialize device
+    /// Initializes the PCA9685 for standard operation.
+    ///
+    /// 1. Sets all PWM outputs to "off".
+    /// 2. Configures the device to use the totem-pole driver and enable the ALLCALL address.
+    /// 3. Takes the PCA9685 out of sleep mode.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any I²C write or read operations fail.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let mut pca = Pca9685::new()?;
+    /// pca.init()?;
+    /// ```
     pub fn init(&mut self) -> rppal::i2c::Result<()> {
         self.set_all_pwm(0, 0)?;
 
@@ -87,6 +128,27 @@ impl Pca9685 {
         Ok(())
     }
 
+    /// Sets the PWM frequency (in Hertz).
+    ///
+    /// The PCA9685's internal clock is assumed to run at 25 MHz. The prescaler is computed to
+    /// achieve the target frequency, then the device is put to sleep momentarily while the new
+    /// prescaler is written.
+    ///
+    /// # Arguments
+    ///
+    /// * `freq_hz` - Desired frequency in Hertz (e.g., `50.0` for servos).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any I²C write or read operations fail.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let mut pca = Pca9685::new()?;
+    /// pca.init()?;
+    /// pca.set_pwm_freq(60.0)?; // typical for some servos
+    /// ```
     pub fn set_pwm_freq(&mut self, freq_hz: f32) -> rppal::i2c::Result<()> {
         let prescaleval = 25e6 / 4096.0 / freq_hz - 1.0;
         let prescale = (prescaleval + 0.5).floor() as u8;
@@ -102,7 +164,28 @@ impl Pca9685 {
         self.i2c.smbus_write_byte(MODE1, old_mode | 0xA1)
     }
 
-    /// Set the PWM at a specific channel
+    /// Sets the PWM ON and OFF counts for a single channel.
+    ///
+    /// # Arguments
+    ///
+    /// * `channel` - The channel index (0–15) on the PCA9685.
+    /// * `on` - The timer tick at which the output is switched ON.
+    /// * `off` - The timer tick at which the output is switched OFF.
+    ///
+    /// Each channel output is controlled by two 12-bit registers: ON and OFF. The timer counts from 0 to 4095.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any I²C write operation fails.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let mut pca = Pca9685::new()?;
+    /// pca.init()?;
+    /// // Turn channel 0 on at 0, off at 1500
+    /// pca.set_pwm(0, 0, 1500)?;
+    /// ```
     pub fn set_pwm(&mut self, channel: u8, on: u16, off: u16) -> rppal::i2c::Result<()> {
         self.i2c
             .smbus_write_byte(LED0_ON_L + 4 * channel, (on & 0xFF) as u8)?;
@@ -116,7 +199,26 @@ impl Pca9685 {
         self.i2c
             .smbus_write_byte(LED0_OFF_H + 4 * channel, (off >> 8) as u8)
     }
-    /// Set the PWM at all channels
+
+    /// Sets the PWM ON and OFF counts for *all* channels simultaneously.
+    ///
+    /// # Arguments
+    ///
+    /// * `on` - The timer tick at which all outputs are switched ON.
+    /// * `off` - The timer tick at which all outputs are switched OFF.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any I²C write operation fails.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let mut pca = Pca9685::new()?;
+    /// pca.init()?;
+    /// // Turn all channels fully OFF
+    /// pca.set_all_pwm(0, 0)?;
+    /// ```
     pub fn set_all_pwm(&mut self, on: u16, off: u16) -> rppal::i2c::Result<()> {
         self.i2c.smbus_write_byte(ALL_LED_ON_L, (on & 0xFF) as u8)?;
 
